@@ -157,7 +157,7 @@ def main():
     else:
         raise ValueError(f"Invalid criteria: {args.criteria}.")
 
-    if reward == 0:
+    if reward == 1:
         status = "success"
     else:
         status = "fail"
