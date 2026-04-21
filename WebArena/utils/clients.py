@@ -134,7 +134,7 @@ class GEMINI_Client:
             {"role": "user", "content": "hi"},
         ])
         """
-        self.client = genai.Client(http_options=HttpOptions(api_version="v1"))
+        self.client = genai.Client(vertexai=True, http_options=HttpOptions(api_version="v1"))
         chat_completion = self.client.models.generate_content(
             model=self.model_name,
             contents=messages[1]['content'],

@@ -20,7 +20,7 @@ import json
 from dataclasses import asdict, dataclass, field
 import traceback
 from warnings import warn
-from langchain.schema import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from browsergym.core.action.base import AbstractActionSet
 from browsergym.utils.obs import flatten_axtree_to_str, flatten_dom_to_str, prune_html

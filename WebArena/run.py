@@ -14,13 +14,19 @@
 
 
 import os
+import shutil
 import argparse
 import json
 from pathlib import Path
 import sys
 import multiprocessing
 
+for _k in ("SHOPPING", "SHOPPING_ADMIN", "REDDIT", "GITLAB", "WIKIPEDIA", "MAP", "HOMEPAGE"):
+    if f"WA_{_k}" in os.environ:
+        os.environ[_k] = os.environ[f"WA_{_k}"]
+
 from memory_management import select_memory
+import webarena_patch  # noqa: F401 — applies MemEvol llm_fuzzy_match prompt
 
 from browsergym.experiments import ExpArgs, EnvArgs
 
@@ -146,38 +152,40 @@ def parse_args():
 def main():
 
     args = parse_args()
-    ensure_file(args.memory_path)
 
-    # Agent with memory retrieval
+    if args.memory_path:
+        ensure_file(args.memory_path)
 
-    website = args.memory_path.split("/")[-1].split(".")[0] if args.memory_path else "default"
-    mem_partial_path = args.memory_path.split("/")[0]
+        # Agent with memory retrieval
 
-    if not os.path.exists(f"./{mem_partial_path}/{website}.jsonl"):
-        open(f"./{mem_partial_path}/{website}.jsonl", "w").close()
+        website = args.memory_path.split("/")[-1].split(".")[0]
+        mem_partial_path = args.memory_path.split("/")[0]
 
-    with open(f"./{mem_partial_path}/{website}.jsonl", "r") as f:
-        reasoning_bank = [json.loads(line) for line in f.readlines()]
+        if not os.path.exists(f"./{mem_partial_path}/{website}.jsonl"):
+            open(f"./{mem_partial_path}/{website}.jsonl", "w").close()
 
-    cur_query = json.load(open(f"./config_files/{args.task_name.split('.')[-1]}.json"))["intent"]
-    
-    res = select_memory(n=1, 
-                        reasoning_bank=reasoning_bank,
-                        cur_query=cur_query,
-                        task_id=args.task_name.split('.')[-1],
-                        cache_path=f"./{mem_partial_path}/{website}_embeddings.jsonl",
-                        prefer_model="gemini")
+        with open(f"./{mem_partial_path}/{website}.jsonl", "r") as f:
+            reasoning_bank = [json.loads(line) for line in f.readlines()]
 
-    if not res:
-        with open(args.memory_path, "w") as f:
-            f.write("")
-    else:
-        mem_items = []
-        for item in res:
-            for i in item["memory_items"]:
-                mem_items.append(i)
-        with open(args.memory_path, "w") as f:
-            f.write("\n\n".join(mem_items) + "\n")
+        cur_query = json.load(open(f"./config_files/{args.task_name.split('.')[-1]}.json"))["intent"]
+
+        res = select_memory(n=1,
+                            reasoning_bank=reasoning_bank,
+                            cur_query=cur_query,
+                            task_id=args.task_name.split('.')[-1],
+                            cache_path=f"./{mem_partial_path}/{website}_embeddings.jsonl",
+                            prefer_model="gemini")
+
+        if not res:
+            with open(args.memory_path, "w") as f:
+                f.write("")
+        else:
+            mem_items = []
+            for item in res:
+                for i in item["memory_items"]:
+                    mem_items.append(i)
+            with open(args.memory_path, "w") as f:
+                f.write("\n\n".join(mem_items) + "\n")
 
     env_args = EnvArgs(
         task_name=args.task_name,
@@ -226,7 +234,10 @@ def main():
     exp_args.prepare(Path(args.results_path))
     exp_args.run()
 
-    os.rename(exp_args.exp_dir, f"{args.results_path}/{args.task_name}")
+    dest = f"{args.results_path}/{args.task_name}"
+    if os.path.exists(dest):
+        shutil.rmtree(dest)
+    os.rename(exp_args.exp_dir, dest)
 
 
 if __name__ == "__main__":

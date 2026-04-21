@@ -16,7 +16,7 @@ from dataclasses import asdict, dataclass
 import io
 import json
 from .prompt_templates import PromptTemplate, get_prompt_template
-from langchain.schema import BaseMessage, SystemMessage, HumanMessage, AIMessage
+from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage, AIMessage
 from functools import partial
 from typing import Optional, List, Any
 import logging
@@ -28,10 +28,10 @@ from typing import Callable
 from pydantic import PrivateAttr
 from langchain_community.llms import HuggingFaceHub, HuggingFacePipeline
 # from langchain_openai import ChatOpenAI
-from langchain.schema import BaseMessage
-from langchain.chat_models.base import SimpleChatModel
+from langchain_core.messages import BaseMessage
+from langchain_core.language_models.chat_models import SimpleChatModel
 from langchain_anthropic import ChatAnthropic
-from langchain.callbacks.manager import CallbackManagerForLLMRun
+from langchain_core.callbacks.manager import CallbackManagerForLLMRun
 from pydantic import Field
 from transformers import pipeline
 from dataclasses import dataclass
@@ -336,6 +336,7 @@ class ChatGemini(SimpleChatModel):
     """
 
     _llm: Callable = PrivateAttr()
+    _client: Any = PrivateAttr()
     n_retry_server: int = Field(default=4)
 
     def __init__(
@@ -357,7 +358,7 @@ class ChatGemini(SimpleChatModel):
             model_url (str, optional): The url of the model to use. If None, then model_name or model_name will be used. Defaults to None.
         """
         logging.info("Loading Gemini")
-        client = genai.Client(http_options=HttpOptions(api_version="v1"))
+        client = genai.Client(vertexai=True, http_options=HttpOptions(api_version="v1"))
 
         llm_fn = partial(
             client.models.generate_content,
@@ -369,6 +370,7 @@ class ChatGemini(SimpleChatModel):
             ),
         )
         super().__init__()
+        self._client = client
         self._llm = llm_fn
         self.n_retry_server = n_retry_server
 

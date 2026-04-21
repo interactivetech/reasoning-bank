@@ -26,7 +26,7 @@ import tiktoken
 import yaml
 # from langchain_openai import ChatOpenAI
 
-from langchain.schema import SystemMessage, HumanMessage
+from langchain_core.messages import SystemMessage, HumanMessage
 from openai import BadRequestError
 from joblib import Memory
 from transformers import AutoModel
@@ -198,7 +198,7 @@ def count_tokens(text, model="openai/gpt-4"):
     if model.startswith('gemini'):
         from google import genai
         from google.genai.types import HttpOptions, GenerateContentConfig
-        client = genai.Client(http_options=HttpOptions(api_version="v1"))
+        client = genai.Client(vertexai=True, http_options=HttpOptions(api_version="v1"))
         return client.models.count_tokens(model=model, contents=[text]).total_tokens
     elif model.startswith("claude"):
         import requests

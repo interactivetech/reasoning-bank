@@ -30,8 +30,12 @@ import logging
 logger = logging.getLogger(__name__)
 from google import genai
 from google.genai.types import EmbedContentConfig
+import vertexai
 from vertexai.language_models import TextEmbeddingInput, TextEmbeddingModel
-client = genai.Client()
+# TextEmbeddingModel requires a regional endpoint; "global" doesn't work.
+vertexai.init(project=os.environ.get("GOOGLE_CLOUD_PROJECT"),
+              location="us-central1")
+client = genai.Client(vertexai=True)
 
 
 def get_embeddings(texts: list) -> list:

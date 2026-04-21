@@ -14,7 +14,7 @@
 
 from typing import List
 
-from langchain.schema import BaseMessage, SystemMessage, HumanMessage, AIMessage
+from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage, AIMessage
 from dataclasses import dataclass
 
 """

@@ -13,10 +13,12 @@
 # limitations under the License.
 
 import os
+import re
+import gzip
+import pickle
 import json
 import random
 import argparse
-import re
 from functools import partial
 import time
 
@@ -24,75 +26,45 @@ from prompts.memory_instruction import SUCCESSFUL_SI, FAILED_SI, AWM_INSTRUCTION
 from utils.clients import CLIENT_DICT
 
 
-def load_blocks(path: str) -> list[list[str]]:
-    """Load blank-line separated blocks from the log file."""
-    blocks, block = [], []
-    for line in open(path, 'r'):
-        if line.strip() == "":
-            blocks.append(block)
-            block = []
-        else:
-            if line.strip():
-                block.append(line.strip())
-    assert len(blocks) % 2 == 0
-    return blocks
+def _extract_think_from_output(ai: dict) -> str:
+    """Extract think text from agent info, falling back to chat_messages."""
+    think = ai.get("think", "")
+    if think:
+        return think
+    # Model may put reasoning outside <think> tags — extract text before <action>
+    msgs = ai.get("chat_messages", [])
+    if len(msgs) >= 3:
+        output = str(msgs[2])
+        action_idx = output.find("<action>")
+        if action_idx > 0:
+            raw = output[:action_idx].strip()
+            raw = re.sub(r"</?think>", "", raw).strip()
+            if raw:
+                return raw
+    return think
 
 
-def remove_invalid_steps(actions: list[str]) -> list[str]:
-    """Remove invalid steps from the action sequence."""
-    valid_actions = []
-    for a in actions:
-        if "click(" in a:
-            arg = a[a.index("(")+1: a.index(")")]
-            try:
-                if type(eval(arg)) == str and type(eval(arg[1:-1])) == int:
-                    valid_actions.append(a)
-            except:
-                continue
-        elif "fill(" in a:
-            arg = a[a.index("(")+1: a.index(",")].strip()
-            if type(eval(arg)) == str:
-                valid_actions.append(a)
-        elif "scroll(" in a or "noop(" in a:
-            continue
-        else:
-            valid_actions.append(a)
-    return valid_actions
-
-def extract_think_and_action(path: str) -> tuple[list[str], list[list[str]]]:
-    """Extract the task trajectory from the log file."""
-    log_text = open(path, 'r').read()
-    lines = log_text.splitlines()
+def extract_think_and_action(folder: str) -> tuple[list[str], list[str]]:
+    """Extract think/action pairs from step pkl files."""
+    step_files = sorted(
+        [f for f in os.listdir(folder) if re.match(r"step_\d+\.pkl\.gz", f)],
+        key=lambda f: int(re.findall(r"\d+", f)[0])
+    )
     think_list = []
     action_list = []
-    i = 0
-    while i < len(lines):
-        line = lines[i].strip()
-        if line.startswith("action:"):
-            # Parse the full action block (can span multiple lines)
-            action_lines = []
-            if line.strip() != "action:":
-                action_lines.append(line[len("action:"):].strip())
-            i += 1
-            while i < len(lines) and lines[i].strip() != "":
-                action_lines.append(lines[i].strip())
-                i += 1
-            action_text = "".join(action_lines).strip()
-
-            # Now look backward for the most recent loop-INFO thinking block
-            thinking_lines = []
-            for j in range(i - 1, -1, -1):
-                if "browsergym.experiments.loop - INFO -" in lines[j]:
-                    thinking = lines[j].split("browsergym.experiments.loop - INFO -", 1)[-1].strip()
-                    thinking_lines.insert(0, thinking)
-                    break
-            thinking_text = "\n".join(thinking_lines).strip()
-            think_list.append(thinking_text)
-            action_list.append(action_text)
-        else:
-            i += 1
-
-    assert len(think_list) == len(action_list)
+    for f in step_files:
+        try:
+            with gzip.open(os.path.join(folder, f), 'rb') as fh:
+                data = pickle.load(fh)
+            ai = data.agent_info
+            think = _extract_think_from_output(ai)
+            action = ai.get("action", "")
+            if not action:  # skip empty action steps
+                continue
+            think_list.append(think)
+            action_list.append(action)
+        except Exception:
+            continue
     return think_list, action_list
 
 def format_trajectory(think_list: list[str], action_list: list[list[str]]) -> str:
@@ -131,9 +103,8 @@ def get_info(f: str, status: str = None) -> dict:
 
     template_id = config["intent_template_id"]  # for deduplication
 
-    # parse trajectory
-    log_path = os.path.join(f, "experiment.log")
-    think_list, action_list = extract_think_and_action(log_path)
+    # parse trajectory from step pkl files
+    think_list, action_list = extract_think_and_action(f)
 
     # add to template dict
     if status == 'success':
@@ -165,21 +136,38 @@ def main():
     ex = get_info(cur_task, status)
 
     # Define the LLM client based on the model choice
-    llm_client = CLIENT_DICT[args.model]
+    llm_client = CLIENT_DICT[args.model](model_name=args.model)
 
     # memory extraction based on the trajectory and user queries
     trajectory = format_trajectory(ex["think_list"], ex["action_list"])
     trajectory = f"**Query:** {ex['query']}\n\n**Trajectory:**\n{trajectory}"
 
+    # Load autoeval thoughts if available, and append to trajectory so the
+    # memory LLM knows why the task succeeded or failed.
+    autoeval_thoughts = ""
+    if args.criteria == "autoeval":
+        autoeval_path = os.path.join(cur_task, f"{args.model}_autoeval.json")
+        try:
+            autoeval_data = json.load(open(autoeval_path))
+            if isinstance(autoeval_data, list) and autoeval_data:
+                autoeval_thoughts = autoeval_data[0].get("thoughts", "")
+            elif isinstance(autoeval_data, dict):
+                autoeval_thoughts = autoeval_data.get("thoughts", "")
+        except Exception:
+            pass
+
     if args.memory_mode == "reasoningbank":
+        if autoeval_thoughts:
+            status_label = "succeeded" if ex['status'] == 'success' else "failed"
+            trajectory += f"\n\nThe task {status_label} because: {autoeval_thoughts}"
         if ex['status'] == 'success':
-            generated_memory_item = llm_client.one_step_chat(trajectory, system_msg=SUCCESSFUL_SI, temperature=0.7)
+            generated_memory_item, _ = llm_client.one_step_chat(trajectory, system_msg=SUCCESSFUL_SI, temperature=1.0)
         else:
-            generated_memory_item = llm_client.one_step_chat(trajectory, system_msg=FAILED_SI, temperature=0.7)
-    
+            generated_memory_item, _ = llm_client.one_step_chat(trajectory, system_msg=FAILED_SI, temperature=1.0)
+
     elif args.memory_mode == "awm":
         if ex['status'] == 'success':
-            generated_memory_item = llm_client.one_step_chat(trajectory, system_msg=AWM_INSTRUCTION + AWM_EXAMPLE, temperature=0.7)
+            generated_memory_item, _ = llm_client.one_step_chat(trajectory, system_msg=AWM_INSTRUCTION + AWM_EXAMPLE, temperature=0.7)
 
     elif args.memory_mode == "synapse":
         if ex['status'] == 'success':
@@ -193,7 +181,7 @@ def main():
             "think_list": ex["think_list"],
             "action_list": ex["action_list"],
             "status": ex["status"],
-            "memory_items": generated_memory_item,
+            "memory_items": generated_memory_item.split("\n\n"),
             "template_id": ex["template_id"]
         }) + '\n')
 

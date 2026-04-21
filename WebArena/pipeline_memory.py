@@ -35,7 +35,7 @@ def main():
             else:
                 config_flags.append(False)
     else:
-        config_flags = [config["sites"][0] == args.website for config in config_list]
+        config_flags = [config["sites"] == [args.website] for config in config_list]
     task_ids = [config["task_id"] for config, flag in zip(config_list, config_flags) if flag]
     # random.shuffle(task_ids)
 
@@ -45,18 +45,20 @@ def main():
     # num = args.output_dir.split("_")[-1]
 
     for tid in task_ids[args.start_index: args.end_index]:
-        
+
         if int(tid) <= args.prev_id:
             continue
 
         # step 1: run inference
-        process = Popen([
-            "python", "run.py", 
+        run_cmd = [
+            "python", "run.py",
             "--task_name", f"webarena.{tid}",
-            "--memory_path", f"memories_{args.memory_mode}/{args.website}.txt",
             "--model_name", args.model,
             "--results_path", f"{args.output_dir}",
-        ])
+        ]
+        if args.memory_mode != "no_memory":
+            run_cmd += ["--memory_path", f"memories_{args.memory_mode}/{args.website}.txt"]
+        process = Popen(run_cmd)
         process.wait()
 
         # step 2: run evaluation
@@ -67,6 +69,9 @@ def main():
             "--log_dir", f"autoeval/logs_{args.memory_mode}_{args.website}",
         ])
         process.wait()
+
+        if args.memory_mode == "no_memory":
+            continue
 
         # step 3: extract new memory items
         process = Popen([
@@ -91,8 +96,9 @@ if __name__ == "__main__":
     parser.add_argument("--model", type=str, default="gemini-2.5-flash",
                         choices=["gemini-2.5-flash", "claude-3-7-sonnet@20250219", "gemini-2.5-pro", "google/gemma-3-12b-it"])
     parser.add_argument("--prev_id", type=int, default=-1)
-    parser.add_argument("--memory_mode", type=str, default="reasoningbank")
-    parser.add_argument("--judge", type=str, default="auto_eval")
+    parser.add_argument("--memory_mode", type=str, default="reasoningbank",
+                        choices=["no_memory", "reasoningbank", "awm", "synapse"])
+    parser.add_argument("--judge", type=str, default="autoeval")
     args = parser.parse_args()
 
     main()

@@ -15,8 +15,11 @@
 
 #!/bin/bash
 
+export GOOGLE_CLOUD_PROJECT="zifengw-research"
+export GOOGLE_CLOUD_LOCATION="global"
+export GOOGLE_GENAI_USE_VERTEXAI="True"
 
-export WA_SHOPPING="http://127.0.0.1:8010"
+export WA_SHOPPING="http://127.0.0.1:8082"
 export WA_SHOPPING_ADMIN="http://127.0.0.1:8020/admin"
 export WA_REDDIT="http://127.0.0.1:8030"
 export WA_GITLAB="http://127.0.0.1:8040"
@@ -24,4 +27,5 @@ export WA_WIKIPEDIA="http://127.0.0.1:8060/wikipedia_en_all_maxi_2022-05/A/User:
 export WA_MAP="http://127.0.0.1:8086"
 export WA_HOMEPAGE="http://127.0.0.1:80"
 
-python pipeline_memory.py --website "shopping" --output_dir "./results" --model "gemini-2.5-flash"
+source /home/junyann_google_com/projects/reasoning-bank/.venv/bin/activate
+python pipeline_memory.py --website "shopping" --output_dir "$HOME/results" --model "gemini-2.5-flash"
