@@ -23,7 +23,7 @@ The goal of summarized memory items is to be helpful and generalizable for futur
   - You must first think why the trajectory is successful, and then summarize the insights.
   - You can extract *at most 3* memory items from the trajectory.
   - You must not repeat similar or overlapping items.
-  - Do not mention specific websites, queries, or string contents, but rather focus on the generalizable insights.
+  - Prefer concrete, actionable procedures over abstract principles. Do not embed specific product names, queries, or literal string contents from the task.
 
 ## Output Format
 Your output must strictly follow the Markdown format shown below:
@@ -31,8 +31,8 @@ Your output must strictly follow the Markdown format shown below:
 ```
 # Memory Item i
 ## Title <the title of the memory item>
-## Description <one sentence summary of the memory item>
-## Content <1-3 sentences describing the insights learned to successfully accomplishing the task>
+## Description <one sentence summary describing when or when NOT to use the memory item>
+## Content <1-3 sentences describing the insights learned to successfully accomplishing similar tasks in the future>
 ```
 """
 
@@ -47,7 +47,7 @@ The goal of summarized memory items is to be helpful and generalizable for futur
   - You must first reflect and think why the trajectory failed, and then summarize what lessons you have learned or strategies to prevent the failure in the future.
   - You can extract *at most 3* memory items from the trajectory.
   - You must not repeat similar or overlapping items.
-  - Do not mention specific websites, queries, or string contents, but rather focus on the generalizable insights.
+  - Prefer concrete, actionable recovery procedures over abstract principles. Do not embed specific product names, queries, or literal string contents from the task.
 
 ## Output Format
 Your output must strictly follow the Markdown format shown below:
@@ -55,8 +55,8 @@ Your output must strictly follow the Markdown format shown below:
 ```
 # Memory Item i
 ## Title <the title of the memory item>
-## Description <one sentence summary of the memory item>
-## Content <1-3 sentences describing the insights learned to successfully accomplishing the task>
+## Description <one sentence summary describing when or when NOT to use the memory item>
+## Content <1-3 sentences describing the insights learned to avoid such failures and successfully accomplishing similar tasks in the future>
 ```
 """
 
@@ -84,8 +84,8 @@ Your output must strictly follow the Markdown format shown below:
 ```
 # Memory Item i
 ## Title <the title of the memory item>
-## Description <one sentence summary of the memory item>
-## Content <1-5 sentences describing the insights learned to successfully accomplishing the task>
+## Description <one sentence summary describing when or when NOT to use the memory item>
+## Content <1-5 sentences describing the insights learned to avoid such failures and successfully accomplishing similar tasks in the future>
 ```
 """
 

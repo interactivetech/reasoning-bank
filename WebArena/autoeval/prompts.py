@@ -1,18 +1,19 @@
-# Copyright 2026 Google LLC
-
+# coding=utf-8
+# Copyright 2026 The Google Research Authors.
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-
-#     https://www.apache.org/licenses/LICENSE-2.0
-
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-def build_obs_simplifier_prompt(cap, intent, response) -> str:
+def build_obs_simplifier_prompt(cap, intent, response):
     prompt = f"""Given the following user question and context, extract part of the context that is unbiased, so that using that text alone would be good context for providing an unbiased answer to the user query.
 
 **User Query**: The bot responded with "{response}", does it execute this task "{intent}" successfully?
@@ -27,14 +28,14 @@ Start your answer with “Unbiased text context (includes all relevant content):
     return prompt
 
 
-def build_naive_last_frame_eval_prompt(cap, intent, response) -> str:
+def build_naive_last_frame_eval_prompt(cap, intent, response):
     prompt = f"""**User Intent**: {intent}
 
 **Bot's Final Observation**:
 
 ```md
 {cap}
-```    
+```
 
 **Bot's response to the user**: {response if response else "None"}.
 
@@ -57,7 +58,7 @@ Format your response as a valid json:
     return prompt
 
 
-def build_naive_multi_frame_eval_prompt(caps, intent, response) -> str:
+def build_naive_multi_frame_eval_prompt(caps, intent, response):
     captions_str = "\n".join(
         [f"{idx+1}:\n```md\n{caption}\n```\n" for idx, caption in enumerate(caps[-3:])]
     )
@@ -109,7 +110,7 @@ def extract_content(text, start_tag):
 
 def build_text_eval_prompt(
     cap, intent, response, last_actions
-) -> tuple[str, str]:
+):
     system_msg = """You are an expert in evaluating the performance of a web navigation agent. The agent is designed to help a human user navigate a website to complete a task. Given the user's intent, the agent's action history, the final state of the webpage, and the agent's response to the user, your goal is to decide whether the agent's execution is successful or not.
 
 There are three types of tasks:
@@ -147,7 +148,7 @@ Bot response to the user: {response if response else "N/A"}."""
 
 def build_vision_eval_prompt(
     intent, response, last_actions
-) -> tuple[str, str]:
+):
     system_msg = """You are an expert in evaluating the performance of a web navigation agent. The agent is designed to help a human user navigate a website to complete a task. Given the user's intent, the agent's action history, the final state of the webpage, and the agent's response to the user, your goal is to decide whether the agent's execution is successful or not.
 
 There are three types of tasks:

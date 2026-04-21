@@ -21,6 +21,11 @@ from pathlib import Path
 import sys
 import multiprocessing
 
+try:
+    from utils import gemini_retry  # noqa: F401 — patches google.genai with backoff
+except ImportError:
+    pass
+
 for _k in ("SHOPPING", "SHOPPING_ADMIN", "REDDIT", "GITLAB", "WIKIPEDIA", "MAP", "HOMEPAGE"):
     if f"WA_{_k}" in os.environ:
         os.environ[_k] = os.environ[f"WA_{_k}"]

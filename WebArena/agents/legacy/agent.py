@@ -35,7 +35,7 @@ from .utils.chat_api import ChatModelArgs
 class GenericAgentArgs(AbstractAgentArgs):
     chat_model_args: ChatModelArgs = None
     flags: dynamic_prompting.Flags = field(default_factory=lambda: dynamic_prompting.Flags())
-    max_retry: int = 4
+    max_retry: int = 6
 
     def make_agent(self):
         return GenericAgent(
@@ -74,7 +74,7 @@ class GenericAgent(Agent):
         self,
         chat_model_args: ChatModelArgs = None,
         flags: dynamic_prompting.Flags = None,
-        max_retry: int = 4,
+        max_retry: int = 6,
     ):
         self.chat_model_args = chat_model_args if chat_model_args is not None else ChatModelArgs()
         self.flags = flags if flags is not None else dynamic_prompting.Flags()

@@ -63,9 +63,19 @@ instructed correspondingly.
 
 #### Data preprocessing
 
-Download raw test files from [here](https://github.com/web-arena-x/webarena/blob/main/config_files/test.raw.json) and put it to `config_files`.
+Download raw test files from [here](https://github.com/web-arena-x/webarena/blob/main/config_files/test.raw.json) and put it to `config_files`. The repo also vendors a patched copy at `third_party/webarena/test.raw.json` with shopping-split annotation corrections; use either one.
 
 Run `generate_config_files.py` to process raw test data to config files as input.
+
+#### Use the vendored `webarena` tree
+
+The repo ships a patched `webarena/` harness at `third_party/webarena/` (corrected shopping annotations, wishlist eval fix, `fill('','')` guard, `retry_with_force=True` clicks, softened `llm_fuzzy_match` judge prompt). Prepend it to `PYTHONPATH` so it shadows the pip-installed `browsergym.webarena`:
+
+```bash
+export PYTHONPATH="$(pwd)/third_party:$PYTHONPATH"
+```
+
+`webarena` is a namespace package, so no code edits are required — every `webarena.*` submodule resolves to the vendored copy.
 
 
 #### Run the code

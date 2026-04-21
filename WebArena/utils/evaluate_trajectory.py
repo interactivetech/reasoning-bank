@@ -16,6 +16,12 @@ import os
 import json
 import argparse
 import traceback
+
+try:
+    from utils import gemini_retry  # noqa: F401 — patches google.genai with backoff
+except ImportError:
+    pass
+
 from utils.evaluator import Evaluator
 from utils.clients import CLIENT_DICT
 
