@@ -1,5 +1,9 @@
 config_files/
 results/
+results_*/
 *.pyc
+__pycache__/
 logs*/
 memories_reasoningbank/
+*.log
+gt_eval.jsonl
