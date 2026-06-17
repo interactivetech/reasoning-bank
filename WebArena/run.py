@@ -172,6 +172,13 @@ def main():
         with open(f"./{mem_partial_path}/{website}.jsonl", "r") as f:
             reasoning_bank = [json.loads(line) for line in f.readlines()]
 
+        webarena_config = {
+            "chroma_path": f"./memory/chroma/webarena/{website}",
+            "collection_name": f"reasoningbank_webarena_{website}",
+            "embedding_model": "BAAI/bge-m3",
+            "retrieval_backend": "chromadb",
+        }
+
         cur_query = json.load(open(f"./config_files/{args.task_name.split('.')[-1]}.json"))["intent"]
 
         res = select_memory(n=1,
@@ -179,7 +186,8 @@ def main():
                             cur_query=cur_query,
                             task_id=args.task_name.split('.')[-1],
                             cache_path=f"./{mem_partial_path}/{website}_embeddings.jsonl",
-                            prefer_model="gemini")
+                            prefer_model="gemini",
+                            memory_config=webarena_config)
 
         if not res:
             with open(args.memory_path, "w") as f:

@@ -101,7 +101,7 @@ The repo now includes local configs for running SWE-Bench against an OpenAI-comp
 vLLM server such as:
 
 ```bash
-http://173.73.39.103:8000/v1
+${VLLM_API_BASE}
 ```
 
 with model:

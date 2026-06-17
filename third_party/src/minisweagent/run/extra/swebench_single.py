@@ -9,7 +9,7 @@ from datasets import load_dataset
 
 from minisweagent import global_config_dir
 from minisweagent.agents.interactive import InteractiveAgent
-from minisweagent.config import builtin_config_dir, get_config_path
+from minisweagent.config import builtin_config_dir, load_config
 from minisweagent.models import get_model
 from minisweagent.run.extra.swebench import (
     DATASET_MAPPING,
@@ -48,7 +48,7 @@ def main(
         instance_spec = sorted(instances.keys())[int(instance_spec)]
     instance: dict = instances[instance_spec]  # type: ignore
 
-    config = yaml.safe_load(get_config_path(config_path).read_text())
+    config = load_config(config_path)
     if environment_class is not None:
         config.setdefault("environment", {})["environment_class"] = environment_class
     if model_class is not None:

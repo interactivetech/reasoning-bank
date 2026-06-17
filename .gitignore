@@ -1,3 +1,5 @@
+*.jsonl
+memory/
 config_files/
 results/
 results_*/

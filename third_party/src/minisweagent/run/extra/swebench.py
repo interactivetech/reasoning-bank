@@ -26,6 +26,7 @@ import threading
 import time
 import traceback
 from pathlib import Path
+from typing import Optional
 from collections import Counter
 
 import os
@@ -38,7 +39,7 @@ from rich.live import Live
 
 from minisweagent import Environment
 from minisweagent.agents.default import DefaultAgent
-from minisweagent.config import builtin_config_dir, get_config_path
+from minisweagent.config import builtin_config_dir, load_config
 from minisweagent.environments import get_environment
 from minisweagent.models import get_model
 from minisweagent.run.extra.utils.batch_progress import RunBatchProgressManager
@@ -50,7 +51,19 @@ try:
 except ImportError:
     select_memory = None
 
+try:
+    from minisweagent.memory.chroma_retrieval import (
+        query_memory_records_raw,
+        rebuild_collection_from_jsonl,
+        upsert_memory_record,
+    )
+except ImportError:
+    query_memory_records_raw = None
+    rebuild_collection_from_jsonl = None
+    upsert_memory_record = None
+
 from minisweagent.memory.instruction import SUCCESSFUL_SI, FAILED_SI
+from minisweagent.memory.telemetry import append_memory_event
 
 try:
     from google import genai
@@ -174,17 +187,136 @@ def _score_memory_item(cur_query: str, item: dict) -> float:
     return overlap / max(sum(query_terms.values()), 1)
 
 
+def _memory_item_texts(memory_items: list[str]) -> list[str]:
+    return [str(item).strip() for item in memory_items if str(item).strip()]
+
+
+def _memory_quality_features(memory_items: list[str]) -> dict[str, object]:
+    items = _memory_item_texts(memory_items)
+    text = "\n".join(items)
+    lower = text.lower()
+    has_memory_item_headers = "# memory item" in lower
+    has_title_headers = "## title" in lower
+    has_description_headers = "## description" in lower
+    has_content_headers = "## content" in lower
+    has_summary_headers = "## summary" in lower
+    has_code_fence = "```" in text
+    has_shell_commands = (
+        "```bash" in lower
+        or "cd /testbed" in lower
+        or "git diff --cached" in lower
+        or "rm -f test_" in lower
+        or "echo complete_task_and_submit_final_output" in lower
+    )
+    has_submit_chatter = (
+        "complete_task_and_submit_final_output" in lower
+        or "let me submit the final output" in lower
+        or "the implementation is complete and all tests pass" in lower
+    )
+    has_timeout_trace = (
+        "timeout of 300 seconds" in lower
+        or "terminated because it took a timeout" in lower
+        or "hint: try kill -9" in lower
+    )
+    has_file_paths = "/testbed/" in text or "astropy/" in text
+    is_empty = not bool(items)
+    looks_structured = bool(
+        (has_memory_item_headers and has_title_headers and has_description_headers and has_content_headers)
+        or has_summary_headers
+    )
+    avg_item_length = (sum(len(item) for item in items) / len(items)) if items else 0.0
+    return {
+        "item_count": len(items),
+        "is_empty": is_empty,
+        "looks_structured": looks_structured,
+        "has_memory_item_headers": has_memory_item_headers,
+        "has_title_headers": has_title_headers,
+        "has_description_headers": has_description_headers,
+        "has_content_headers": has_content_headers,
+        "has_summary_headers": has_summary_headers,
+        "has_code_fence": has_code_fence,
+        "has_shell_commands": has_shell_commands,
+        "has_submit_chatter": has_submit_chatter,
+        "has_timeout_trace": has_timeout_trace,
+        "has_file_paths": has_file_paths,
+        "avg_item_length": round(avg_item_length, 2),
+        "char_len": len(text),
+    }
+
+
+def _memory_quality_labels(features: dict[str, object]) -> list[str]:
+    labels: list[str] = []
+    if features["is_empty"]:
+        labels.append("empty")
+    if not features["looks_structured"]:
+        labels.append("unstructured")
+    if features["has_shell_commands"]:
+        labels.append("procedural_shell")
+    if features["has_submit_chatter"]:
+        labels.append("procedural_submit")
+    if features["has_timeout_trace"]:
+        labels.append("trace_timeout")
+    return labels
+
+
+def _ensure_chroma_collection(memory_config: dict, memory_path: Path, reasoning_bank: list[dict]) -> None:
+    """Rebuild ChromaDB collection from JSONL if it doesn't exist yet."""
+    persist_directory = memory_config.get("chroma_path", str(memory_path.parent / "chroma" / "swebench"))
+    collection_name = memory_config.get("collection_name", "reasoningbank_swebench")
+    model_path = memory_config.get("embedding_model", "BAAI/bge-m3")
+    chroma_dir = Path(persist_directory)
+    if not chroma_dir.exists():
+        chroma_dir.mkdir(parents=True, exist_ok=True)
+        logger.info("ChromaDB directory created at %s, rebuilding from JSONL.", chroma_dir)
+        if rebuild_collection_from_jsonl is not None:
+            rebuild_collection_from_jsonl(
+                jsonl_path=str(memory_path),
+                persist_directory=persist_directory,
+                collection_name=collection_name,
+                model_path=model_path,
+            )
+
+
 def select_memory_for_task(
     reasoning_bank: list[dict],
     cur_query: str,
     task_id: str,
     cache_path: str,
     memory_config: dict,
+    memory_path: Optional[Path] = None,
 ) -> list[dict]:
     backend = memory_config.get("retrieval_backend", "lexical")
     top_k = int(memory_config.get("top_k", 1))
     if not reasoning_bank:
         return []
+
+    if backend == "chromadb":
+        persist_directory = memory_config.get("chroma_path", str(memory_path.parent / "chroma" / "swebench") if memory_path else "./memory/chroma/swebench")
+        collection_name = memory_config.get("collection_name", "reasoningbank_swebench")
+        model_path = memory_config.get("embedding_model", "BAAI/bge-m3")
+
+        # Ensure collection exists / rebuild if needed
+        if memory_path is not None:
+            _ensure_chroma_collection(memory_config, memory_path, reasoning_bank)
+
+        if query_memory_records_raw is None:
+            logger.warning("ChromaDB retrieval requested but chromadb_retrieval is not installed. Falling back to lexical.")
+        else:
+            chroma_results = query_memory_records_raw(
+                query_text=cur_query,
+                persist_directory=persist_directory,
+                collection_name=collection_name,
+                top_k=top_k,
+            )
+            if chroma_results:
+                # Map chroma results back to reasoning_bank entries
+                out = []
+                chroma_task_ids = {r["task_id"] for r in chroma_results}
+                for item in reasoning_bank:
+                    if item.get("task_id") in chroma_task_ids:
+                        out.append(item)
+                if out:
+                    return out
 
     if backend == "embedding":
         if select_memory is None:
@@ -248,6 +380,7 @@ def process_instance(
     memory_dir = Path("./memory")
     memory_dir.mkdir(exist_ok=True)
     memory_path = memory_dir / f"{memory_model_key}.jsonl"
+    telemetry_path = memory_dir / f"{memory_model_key}_telemetry.jsonl"
     embeddings_cache_path = memory_dir / f"{memory_model_key}_embeddings.jsonl"
     selected_memory = ""
     if use_memory:
@@ -264,6 +397,27 @@ def process_instance(
             task_id=instance_id,
             cache_path=str(embeddings_cache_path),
             memory_config=memory_config,
+            memory_path=memory_path,
+        )
+
+        append_memory_event(
+            telemetry_path,
+            {
+                "event": "retrieval",
+                "task_id": instance_id,
+                "backend": memory_config.get("retrieval_backend", "lexical"),
+                "memory_bank_size": len(memory_bank),
+                "selected_count": len(res),
+                "selected_task_ids": [item.get("task_id") for item in res],
+                "selected_quality_features": [
+                    _memory_quality_features(item.get("memory_items", []))
+                    for item in res
+                ],
+                "selected_quality_labels": [
+                    _memory_quality_labels(_memory_quality_features(item.get("memory_items", [])))
+                    for item in res
+                ],
+            },
         )
 
         if res:
@@ -319,6 +473,8 @@ def process_instance(
                 generated_memory_item = llm_generate(trajectory, memory_model or model, False, si=SUCCESSFUL_SI)
             else:
                 generated_memory_item = llm_generate(trajectory, memory_model or model, False, si=FAILED_SI)
+            quality_features = _memory_quality_features(generated_memory_item)
+            quality_labels = _memory_quality_labels(quality_features)
 
             with open(memory_path, "a") as f:
                 f.write(json.dumps({
@@ -327,6 +483,38 @@ def process_instance(
                     "memory_items": generated_memory_item,
                     "status": "success" if status else "fail",
                 }) + "\n")
+
+            append_memory_event(
+                telemetry_path,
+                {
+                    "event": "write",
+                    "task_id": instance_id,
+                    "status": "success" if status else "fail",
+                    "memory_bank_size_before": len(memory_bank),
+                    "quality_features": quality_features,
+                    "quality_labels": quality_labels,
+                    "memory_preview": _memory_item_texts(generated_memory_item)[:3],
+                },
+            )
+
+            # Upsert into ChromaDB (non-blocking, don't crash on failure)
+            if upsert_memory_record is not None:
+                try:
+                    persist_directory = memory_config.get("chroma_path", str(memory_path.parent / "chroma" / "swebench"))
+                    collection_name = memory_config.get("collection_name", "reasoningbank_swebench")
+                    upsert_memory_record(
+                        record={
+                            "task_id": instance_id,
+                            "query": task,
+                            "memory_items": generated_memory_item,
+                            "status": "success" if status else "fail",
+                        },
+                        persist_directory=persist_directory,
+                        collection_name=collection_name,
+                        model_path=memory_config.get("embedding_model", "BAAI/bge-m3"),
+                    )
+                except Exception:
+                    logger.warning("ChromaDB upsert failed for %s (non-fatal)", instance_id, exc_info=True)
 
 
 def llm_judge_status(task: str, trajectory: str, model) -> str:
@@ -397,7 +585,7 @@ def main(
     logger.info(f"Running on {len(instances)} instances...")
 
 
-    config = yaml.safe_load(get_config_path(config_spec).read_text())
+    config = load_config(config_spec)
     if environment_class is not None:
         config.setdefault("environment", {})["environment_class"] = environment_class
     if model is not None:

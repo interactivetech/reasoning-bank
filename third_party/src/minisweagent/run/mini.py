@@ -18,7 +18,7 @@ from rich.console import Console
 from minisweagent import global_config_dir
 from minisweagent.agents.interactive import InteractiveAgent
 from minisweagent.agents.interactive_textual import TextualAgent
-from minisweagent.config import builtin_config_dir, get_config_path
+from minisweagent.config import builtin_config_dir, load_config
 from minisweagent.environments.local import LocalEnvironment
 from minisweagent.models import get_model
 from minisweagent.run.extra.config import configure_if_first_time
@@ -57,7 +57,7 @@ def main(
 ) -> Any:
     # fmt: on
     configure_if_first_time()
-    config = yaml.safe_load(get_config_path(config_spec).read_text())
+    config = load_config(config_spec)
 
     if not task:
         console.print("[bold yellow]What do you want to do?")

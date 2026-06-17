@@ -35,6 +35,7 @@ dependencies = [
     "requests",
     "jinja2",
     "litellm >= 1.75.5",  # want to have gpt-5 support
+    "chromadb>=0.5.0",
     "tenacity",
     "rich",
     "python-dotenv",
@@ -42,6 +43,7 @@ dependencies = [
     "platformdirs",
     "textual",
     "prompt_toolkit",
+    "sentence-transformers>=3.0.0",
     "openai != 1.100.0,!=1.100.1",  # https://github.com/SWE-agent/mini-swe-agent/issues/446
 ]
 

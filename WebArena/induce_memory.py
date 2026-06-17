@@ -173,7 +173,7 @@ def main():
         if ex['status'] == 'success':
             generated_memory_item = trajectory
 
-    # write memory to jsonl file 
+    # write memory to jsonl file
     with open(args.output_path, 'a') as f:
         f.write(json.dumps({
             "task_id": args.task.split(".")[-1],
@@ -184,6 +184,28 @@ def main():
             "memory_items": generated_memory_item.split("\n\n"),
             "template_id": ex["template_id"]
         }) + '\n')
+
+    # Upsert into ChromaDB (non-fatal if it fails or memory mode is unsupported)
+    if args.memory_mode == "reasoningbank":
+        try:
+            from minisweagent.memory.chroma_retrieval import upsert_memory_record
+            website_part = os.path.splitext(os.path.basename(args.output_path))[0]
+            persist_directory = f"./memory/chroma/webarena/{website_part}"
+            collection_name = f"reasoningbank_webarena_{website_part}"
+            upsert_memory_record(
+                record={
+                    "task_id": args.task.split(".")[-1],
+                    "query": ex["query"],
+                    "memory_items": generated_memory_item.split("\n\n"),
+                    "status": ex["status"],
+                },
+                persist_directory=persist_directory,
+                collection_name=collection_name,
+                model_path="BAAI/bge-m3",
+            )
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning("ChromaDB upsert failed for %s (non-fatal)", args.task, exc_info=True)
 
 
 if __name__ == "__main__":

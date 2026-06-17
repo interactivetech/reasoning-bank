@@ -144,7 +144,7 @@ environment:
 model:
   model_name: "openai/Qwen/Qwen3.6-35B-A3B-FP8"
   model_kwargs:
-    api_base: "http://173.73.39.103:8000/v1"
+    api_base: "${VLLM_API_BASE}"
     api_key: "dummy"
     drop_params: true
     temperature: 0.0

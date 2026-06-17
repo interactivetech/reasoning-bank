@@ -3,6 +3,8 @@
 import os
 from pathlib import Path
 
+import yaml
+
 builtin_config_dir = Path(__file__).parent
 
 
@@ -24,4 +26,11 @@ def get_config_path(config_spec: str | Path) -> Path:
     raise FileNotFoundError(f"Could not find config file for {config_spec} (tried: {candidates})")
 
 
-__all__ = ["builtin_config_dir", "get_config_path"]
+def load_config(config_spec: str | Path) -> dict:
+    """Load a YAML config after expanding environment variables in its text."""
+    config_text = get_config_path(config_spec).read_text()
+    expanded = os.path.expandvars(config_text)
+    return yaml.safe_load(expanded)
+
+
+__all__ = ["builtin_config_dir", "get_config_path", "load_config"]

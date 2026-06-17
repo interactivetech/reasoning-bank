@@ -21,7 +21,7 @@ import os
 import json
 import argparse
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 import torch
 import torch.nn.functional as F
 from torch import Tensor
@@ -36,6 +36,17 @@ from vertexai.language_models import TextEmbeddingInput, TextEmbeddingModel
 vertexai.init(project=os.environ.get("GOOGLE_CLOUD_PROJECT"),
               location="us-central1")
 client = genai.Client(vertexai=True)
+
+try:
+    from minisweagent.memory.chroma_retrieval import (
+        query_memory_records_raw,
+        rebuild_collection_from_jsonl,
+        upsert_memory_record,
+    )
+except ImportError:
+    query_memory_records_raw = None
+    rebuild_collection_from_jsonl = None
+    upsert_memory_record = None
 
 
 def get_embeddings(texts: list) -> list:
@@ -135,34 +146,70 @@ def formalize(queries):
         tmp.append(data)
     return tmp, ids
 
+def _chromadb_retrieve(reasoning_bank: List[Dict],
+                       cur_query: str,
+                       top_k: int = 1,
+                       chroma_path: str = "./memory/chroma/webarena",
+                       collection_name: str = "reasoningbank_webarena") -> List[Dict]:
+    """Retrieve memory from ChromaDB, falling back to empty list on any error."""
+    if query_memory_records_raw is None:
+        logger.warning("ChromaDB retrieval requested but chromadb_retrieval not installed. Falling back.")
+        return []
+
+    results = query_memory_records_raw(
+        query_text=cur_query,
+        persist_directory=chroma_path,
+        collection_name=collection_name,
+        top_k=top_k,
+    )
+    if not results:
+        return []
+
+    chroma_task_ids = {r["task_id"] for r in results}
+    out = []
+    for item in reasoning_bank:
+        if item.get("task_id") in chroma_task_ids:
+            out.append(item)
+    return out
+
+
 def select_memory(n: int,
                   reasoning_bank: List[Dict],
                   cur_query: str,
                   task_id: str = None,
                   cache_path: str = "./memories/embeddings.jsonl",
-                  prefer_model: str = "gemini") -> Dict:
+                  prefer_model: str = "gemini",
+                  memory_config: Optional[dict] = None) -> List[Dict]:
     """
-    Returns a dict of top-n items by ID -> (optionally) original metadata.
-    This uses ONLY the cached embeddings; it does not recompute them.
+    ChromaDB-aware wrapper around select_memory.
+    If memory_config enables chromadb, use it; otherwise delegate to the
+    existing embedding path (screening-based).
     """
     if n > 10:
         logger.error("the number of return experiences shouldn't be greater than 10")
 
+    if memory_config and memory_config.get("retrieval_backend") == "chromadb":
+        chroma_path = memory_config.get("chroma_path", "./memory/chroma/webarena")
+        collection_name = memory_config.get("collection_name", "reasoningbank_webarena")
+        results = _chromadb_retrieve(reasoning_bank, cur_query, top_k=n,
+                                     chroma_path=chroma_path,
+                                     collection_name=collection_name)
+        if results:
+            return results
+
+    # Fallback to existing embedding-based screening
     id2score, ordered_ids = screening(cur_query=cur_query,
                                       task_id=task_id,
                                       cache_path=cache_path,
                                       prefer_model=prefer_model)
 
     if not ordered_ids:
-        return {}
+        return []
 
     top_ids = ordered_ids[:n]
 
-    # optional: map back to your in-memory store if you have it
-    # below assumes your cache ids correspond 1:1 to indices in reasoning_bank
     out = []
     for sid in top_ids:
-        # find the corresponding reasoning bank entry, with reasoning_bank["task_id"] == sid
         for i, item in enumerate(reasoning_bank):
             if item["task_id"] == sid:
                 out.append(reasoning_bank[i])

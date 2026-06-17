@@ -8,7 +8,7 @@ import yaml
 from rich.console import Console
 
 from minisweagent.agents.interactive import InteractiveAgent
-from minisweagent.config import builtin_config_dir, get_config_path
+from minisweagent.config import builtin_config_dir, load_config
 from minisweagent.environments.docker import DockerEnvironment
 from minisweagent.models import get_model
 from minisweagent.run.extra.config import configure_if_first_time
@@ -47,7 +47,7 @@ def main(
     """Run mini-SWE-agent on a GitHub issue"""
     configure_if_first_time()
 
-    _config = yaml.safe_load(get_config_path(config).read_text())
+    _config = load_config(config)
     _agent_config = _config.setdefault("agent", {})
     if yolo:
         _agent_config["mode"] = "yolo"
