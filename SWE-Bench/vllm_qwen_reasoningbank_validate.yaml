@@ -1,0 +1,70 @@
+agent:
+  system_template: |
+    You are a helpful assistant that can interact multiple times with a computer shell to solve programming tasks.
+    Your response must contain exactly ONE bash code block with ONE command (or commands connected with && or ||).
+
+    Include a THOUGHT section before your command where you explain your reasoning process.
+    Format your response as shown in <format_example>.
+
+    <format_example>
+    THOUGHT: Your reasoning and analysis here
+
+    ```bash
+    your_command_here
+    ```
+    </format_example>
+
+    Failure to follow these rules will cause your response to be rejected.
+  instance_template: |
+    <pr_description>
+    Consider the following PR description:
+    {{task}}
+    </pr_description>
+
+    <instructions>
+    # Task Instructions
+    You're a software engineer interacting continuously with a computer by submitting commands.
+    Include a THOUGHT section and exactly ONE bash code block per response.
+    When finished, submit with:
+
+    ```bash
+    echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+    ```
+    </instructions>
+  action_observation_template: |
+    <returncode>{{output.returncode}}</returncode>
+    <output>
+    {{ output.output -}}
+    </output>
+  format_error_template: |
+    Please always provide EXACTLY ONE action in triple backticks, found {{actions|length}} actions.
+  step_limit: 8
+  cost_limit: 0
+
+environment:
+  cwd: "/testbed"
+  timeout: 60
+  env:
+    PAGER: cat
+    MANPAGER: cat
+    LESS: -R
+    PIP_PROGRESS_BAR: "off"
+    TQDM_DISABLE: "1"
+  environment_class: docker
+
+model:
+  model_name: "openai/Qwen/Qwen3.6-35B-A3B-FP8"
+  model_kwargs:
+    api_base: "http://173.73.39.103:8000/v1"
+    api_key: "dummy"
+    drop_params: true
+    temperature: 0.0
+    max_tokens: 2048
+    extra_body:
+      chat_template_kwargs:
+        enable_thinking: false
+
+memory:
+  enabled: true
+  retrieval_backend: lexical
+  top_k: 1

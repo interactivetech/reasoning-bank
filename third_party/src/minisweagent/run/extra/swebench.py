@@ -26,6 +26,7 @@ import threading
 import time
 import traceback
 from pathlib import Path
+from collections import Counter
 
 import os
 
@@ -44,11 +45,22 @@ from minisweagent.run.extra.utils.batch_progress import RunBatchProgressManager
 from minisweagent.run.utils.save import save_traj
 from minisweagent.utils.log import add_file_handler, logger
 
-from minisweagent.memory.memory_management import select_memory
+try:
+    from minisweagent.memory.memory_management import select_memory
+except ImportError:
+    select_memory = None
+
 from minisweagent.memory.instruction import SUCCESSFUL_SI, FAILED_SI
-from google import genai
-from google.genai.types import HttpOptions, GenerateContentConfig
-client = genai.Client(http_options=HttpOptions(api_version="v1"))
+
+try:
+    from google import genai
+    from google.genai.types import HttpOptions, GenerateContentConfig
+
+    client = genai.Client(http_options=HttpOptions(api_version="v1"))
+except ImportError:
+    genai = None
+    GenerateContentConfig = None
+    client = None
 
 _HELP_TEXT = """Run mini-SWE-agent on SWEBench instances.
 
@@ -141,22 +153,79 @@ def remove_from_preds_file(output_path: Path, instance_id: str):
             del output_data[instance_id]
             output_path.write_text(json.dumps(output_data, indent=2))
 
-def llm_generate(prompt: list[dict], model, verbose: bool = False, si: str = None) -> str:
-    """Call gpt model to generate memories."""
-    if verbose: 
-        print("Prompt:\n", prompt, '\n\n')
-    response = client.models.generate_content(
-        model=model,
-        contents=prompt,
-        config=GenerateContentConfig(
-            temperature=1.0,
-            max_output_tokens=65536,
-            system_instruction=si.strip() if si else None,
-        )
+def _tokenize_for_memory(text: str) -> list[str]:
+    return re.findall(r"[a-z0-9_]+", text.lower())
+
+
+def _memory_safe_model_name(model_name: str) -> str:
+    return re.sub(r"[^A-Za-z0-9._-]+", "__", model_name)
+
+
+def _score_memory_item(cur_query: str, item: dict) -> float:
+    query_terms = Counter(_tokenize_for_memory(cur_query))
+    memory_text = " ".join(
+        [item.get("query", "")]
+        + item.get("memory_items", [])
     )
-    response = response.text
-    if verbose: print(response)
-    return response.split("\n\n")
+    memory_terms = Counter(_tokenize_for_memory(memory_text))
+    if not query_terms or not memory_terms:
+        return 0.0
+    overlap = sum(min(query_terms[t], memory_terms[t]) for t in query_terms.keys() & memory_terms.keys())
+    return overlap / max(sum(query_terms.values()), 1)
+
+
+def select_memory_for_task(
+    reasoning_bank: list[dict],
+    cur_query: str,
+    task_id: str,
+    cache_path: str,
+    memory_config: dict,
+) -> list[dict]:
+    backend = memory_config.get("retrieval_backend", "lexical")
+    top_k = int(memory_config.get("top_k", 1))
+    if not reasoning_bank:
+        return []
+
+    if backend == "embedding":
+        if select_memory is None:
+            raise RuntimeError("Embedding retrieval requested, but memory dependencies are not installed.")
+        return select_memory(
+            top_k,
+            reasoning_bank=reasoning_bank,
+            cur_query=cur_query,
+            task_id=task_id,
+            cache_path=cache_path,
+            prefer_model=memory_config.get("embedding_model", "Qwen"),
+        )
+
+    ranked = sorted(
+        reasoning_bank,
+        key=lambda item: _score_memory_item(cur_query, item),
+        reverse=True,
+    )
+    return ranked[:top_k]
+
+
+def model_generate_text(model, prompt: str, *, system_instruction: str | None = None, temperature: float = 0.0) -> str:
+    response = model.query(
+        [
+            *([{"role": "system", "content": system_instruction}] if system_instruction else []),
+            {"role": "user", "content": prompt},
+        ],
+        temperature=temperature,
+        max_tokens=2048,
+    )
+    return response["content"]
+
+
+def llm_generate(prompt: str, model, verbose: bool = False, si: str | None = None) -> list[str]:
+    """Generate memory items using the configured model backend."""
+    if verbose:
+        print("Prompt:\n", prompt, "\n\n")
+    response = model_generate_text(model, prompt, system_instruction=si.strip() if si else None, temperature=1.0)
+    if verbose:
+        print(response)
+    return [block.strip() for block in response.split("\n\n") if block.strip()]
 
 def process_instance(
     instance: dict,
@@ -171,24 +240,38 @@ def process_instance(
     remove_from_preds_file(output_dir / "preds.json", instance_id)
     (instance_dir / f"{instance_id}.traj.json").unlink(missing_ok=True)
     model = get_model(config=config.get("model", {}))
+    memory_model = None
     task = instance["problem_statement"]
+    memory_config = config.get("memory", {})
+    use_memory = memory_config.get("enabled", True)
+    memory_model_key = _memory_safe_model_name(model.config.model_name)
+    memory_dir = Path("./memory")
+    memory_dir.mkdir(exist_ok=True)
+    memory_path = memory_dir / f"{memory_model_key}.jsonl"
+    embeddings_cache_path = memory_dir / f"{memory_model_key}_embeddings.jsonl"
+    selected_memory = ""
+    if use_memory:
+        memory_model = get_model(config=config.get("model", {}))
+        if not memory_path.exists():
+            memory_path.write_text("")
 
-    if not os.path.exists(f"./memory/{model.config.model_name}.jsonl"):
-        open(f"./memory/{model.config.model_name}.jsonl", "w").close()  # create an empty file
+        with open(memory_path, "r") as f:
+            memory_bank = [json.loads(line) for line in f.readlines()]
 
-    with open(f"./memory/{model.config.model_name}.jsonl", "r") as f:
-        memory_bank = [json.loads(line) for line in f.readlines()]
+        res = select_memory_for_task(
+            reasoning_bank=memory_bank,
+            cur_query=task,
+            task_id=instance_id,
+            cache_path=str(embeddings_cache_path),
+            memory_config=memory_config,
+        )
 
-    res = select_memory(1, reasoning_bank=memory_bank, cur_query=task, task_id=instance_id, cache_path=f"./memory/{model.config.model_name}_embeddings.jsonl", prefer_model="gemini")
-
-    if not res:
-        selected_memory = ""
-    else:
-        mem_items = []
-        for item in res:
-            for i in item["memory_items"]:
-                mem_items.append(i)
-        selected_memory = "\n\n".join(mem_items)
+        if res:
+            mem_items = []
+            for item in res:
+                for i in item["memory_items"]:
+                    mem_items.append(i)
+            selected_memory = "\n\n".join(mem_items)
     
 
     progress_manager.on_instance_start(instance_id)
@@ -224,39 +307,36 @@ def process_instance(
         update_preds_file(output_dir / "preds.json", instance_id, model.config.model_name, result)
         progress_manager.on_instance_end(instance_id, exit_status)
 
-        # read trajectory and extract memory
-        with open(instance_dir / f"{instance_id}.traj.json", "r") as f:
-            messages = json.load(f)["messages"]
-        trajectory = "\n".join([m["content"] for m in messages if m["role"] != "system"])
-        status = llm_judge_status(task, trajectory, model.config.model_name)
-        
-        trajectory = f"**Query:** {task}\n\n**Trajectory:**\n{trajectory}"
-        if status:
-            generated_memory_item = llm_generate(trajectory, model.config.model_name, True, si=SUCCESSFUL_SI)
-        else:
-            generated_memory_item = llm_generate(trajectory, model.config.model_name, True, si=FAILED_SI)
+        if use_memory:
+            # read trajectory and extract memory
+            with open(instance_dir / f"{instance_id}.traj.json", "r") as f:
+                messages = json.load(f)["messages"]
+            trajectory = "\n".join([m["content"] for m in messages if m["role"] != "system"])
+            status = llm_judge_status(task, trajectory, memory_model or model)
 
-        with open(f"./memory/{model.config.model_name}.jsonl", "a") as f:
-            f.write(json.dumps({
-                "task_id": instance_id, 
-                "query": task, 
-                "memory_items": generated_memory_item,
-                "status": "success" if status else "fail",
-            }) + "\n")
+            trajectory = f"**Query:** {task}\n\n**Trajectory:**\n{trajectory}"
+            if status:
+                generated_memory_item = llm_generate(trajectory, memory_model or model, False, si=SUCCESSFUL_SI)
+            else:
+                generated_memory_item = llm_generate(trajectory, memory_model or model, False, si=FAILED_SI)
+
+            with open(memory_path, "a") as f:
+                f.write(json.dumps({
+                    "task_id": instance_id,
+                    "query": task,
+                    "memory_items": generated_memory_item,
+                    "status": "success" if status else "fail",
+                }) + "\n")
 
 
-def llm_judge_status(task: str, trajectory: str, model: str) -> str:
+def llm_judge_status(task: str, trajectory: str, model) -> str:
     prompt = f"Task: {task}\n\nTrajectory:\n{trajectory}\n\nDid the agent successfully complete the task? Answer with 'success' or 'fail' only."
-    response = client.models.generate_content(
-        model=model,
-        contents=prompt,
-        config=GenerateContentConfig(
-            temperature=0.0,
-            max_output_tokens=65536,
-            system_instruction="You are a helpful assistant that judges whether the agent successfully completed the task.",
-        )
-    )
-    response = response.text.strip().lower()
+    response = model_generate_text(
+        model,
+        prompt,
+        system_instruction="You are a helpful assistant that judges whether the agent successfully completed the task.",
+        temperature=0.0,
+    ).strip().lower()
     if "success" in response:
         return True
     else:

@@ -64,17 +64,19 @@ class LitellmModel:
         try:
             cost = litellm.cost_calculator.completion_cost(response)
         except Exception as e:
-            logger.critical(
+            logger.warning(
                 f"Error calculating cost for model {self.config.model_name}: {e}. "
-                "Please check the 'Updating the model registry' section in the documentation. "
-                "http://bit.ly/4p31bi4 Still stuck? Please open a github issue for help!"
+                "Defaulting this response cost to 0.0 because custom OpenAI-compatible "
+                "endpoints often do not have a LiteLLM pricing entry."
             )
-            raise
+            cost = 0.0
         self.n_calls += 1
         self.cost += cost
         GLOBAL_MODEL_STATS.add(cost)
+        message = response.choices[0].message  # type: ignore
+        content = message.content or getattr(message, "reasoning", "") or ""
         return {
-            "content": response.choices[0].message.content or "",  # type: ignore
+            "content": content,
         }
 
     def get_template_vars(self) -> dict[str, Any]:

@@ -95,6 +95,203 @@ configuration for VertexAI is properly configured as instructed in `run.sh`.
 
 For evaluation, please refer to `sb-cli` command in the [official documentation](https://mini-swe-agent.com/latest/usage/swebench/). 
 
+#### Local vLLM integration
+
+The repo now includes local configs for running SWE-Bench against an OpenAI-compatible
+vLLM server such as:
+
+```bash
+http://173.73.39.103:8000/v1
+```
+
+with model:
+
+```bash
+Qwen/Qwen3.6-35B-A3B-FP8
+```
+
+The added configs are:
+
+* `SWE-Bench/vllm_qwen_no_memory.yaml`: vLLM run without ReasoningBank memory
+* `SWE-Bench/vllm_qwen_one_task.yaml`: vLLM run without memory for a single full task
+* `SWE-Bench/vllm_qwen_reasoningbank.yaml`: vLLM run with ReasoningBank memory enabled
+* `SWE-Bench/vllm_qwen_reasoningbank_validate.yaml`: short validation config for memory plumbing
+
+The SWE-Bench path was also adapted to:
+
+* use LiteLLM against a custom OpenAI-compatible endpoint
+* tolerate missing LiteLLM pricing metadata for custom models
+* make the no-memory path independent of Gemini / Vertex AI
+* make the ReasoningBank path use the configured model for memory generation and judging
+* store memory under sanitized file names in the local `memory/` directory
+
+#### Environment setup
+
+One working local setup is:
+
+```bash
+cd /Users/mendeza/Documents/2026_research_projects/reasoning-bank
+uv venv .venv --python 3.14
+. .venv/bin/activate
+uv pip install -e ./third_party datasets
+```
+
+#### Run two tasks without memory
+
+Use a dedicated output directory for each run:
+
+```bash
+cd /Users/mendeza/Documents/2026_research_projects/reasoning-bank
+. .venv/bin/activate
+mini-extra swebench \
+  --config SWE-Bench/vllm_qwen_no_memory.yaml \
+  --subset lite \
+  --split test \
+  --slice 0:2 \
+  --workers 1 \
+  --output SWE-Bench/results_vllm_two_tasks_no_memory
+```
+
+If you want two specific tasks instead of the first two:
+
+```bash
+mini-extra swebench \
+  --config SWE-Bench/vllm_qwen_no_memory.yaml \
+  --subset lite \
+  --split test \
+  --filter '^(astropy__astropy-12907|astropy__astropy-14182)$' \
+  --workers 1 \
+  --output SWE-Bench/results_vllm_two_tasks_no_memory
+```
+
+#### Run two tasks with ReasoningBank memory
+
+The first task populates the local memory bank:
+
+```bash
+cd /Users/mendeza/Documents/2026_research_projects/reasoning-bank
+. .venv/bin/activate
+mini-extra swebench \
+  --config SWE-Bench/vllm_qwen_reasoningbank.yaml \
+  --subset lite \
+  --split test \
+  --slice 0:1 \
+  --workers 1 \
+  --output SWE-Bench/results_vllm_reasoningbank_task1
+```
+
+Then run the second task and reuse the memory written by the first run:
+
+```bash
+mini-extra swebench \
+  --config SWE-Bench/vllm_qwen_reasoningbank.yaml \
+  --subset lite \
+  --split test \
+  --slice 1:2 \
+  --workers 1 \
+  --output SWE-Bench/results_vllm_reasoningbank_task2
+```
+
+If you want to run both tasks into the same output directory, that also works.
+`preds.json` will accumulate both completed instances. Just make sure you do not
+accidentally reuse the same `--slice` if you intend to keep prior results.
+
+#### Where memory is stored
+
+ReasoningBank memory is stored locally in:
+
+```bash
+memory/openai__Qwen__Qwen3.6-35B-A3B-FP8.jsonl
+```
+
+Each line is a JSON object containing:
+
+* `task_id`
+* `query`
+* `memory_items`
+* `status`
+
+You can inspect it with:
+
+```bash
+sed -n '1,80p' memory/openai__Qwen__Qwen3.6-35B-A3B-FP8.jsonl
+```
+
+#### How to verify memory worked
+
+There are two practical checks:
+
+1. Verify that the memory file exists and contains entries:
+
+```bash
+wc -l memory/openai__Qwen__Qwen3.6-35B-A3B-FP8.jsonl
+sed -n '1,120p' memory/openai__Qwen__Qwen3.6-35B-A3B-FP8.jsonl
+```
+
+2. Verify that a follow-up task received memory in its system prompt by checking
+   the trajectory file:
+
+```bash
+python3 - <<'PY'
+import json
+traj = "SWE-Bench/results_vllm_reasoningbank_task2/astropy__astropy-14182/astropy__astropy-14182.traj.json"
+obj = json.load(open(traj))
+system = obj["messages"][0]["content"]
+print("Below are some memory items" in system)
+print(system[:2000])
+PY
+```
+
+If the first printed value is `True`, the second task was started with retrieved
+ReasoningBank memory.
+
+#### Evaluate runs without memory
+
+For a run without memory, submit the resulting `preds.json` with `sb-cli`:
+
+```bash
+sb-cli submit swe-bench_lite test \
+  --predictions_path /Users/mendeza/Documents/2026_research_projects/reasoning-bank/SWE-Bench/results_vllm_two_tasks_no_memory/preds.json \
+  --run_id vllm_qwen_no_memory_two_tasks
+```
+
+Or run local evaluation:
+
+```bash
+python -m swebench.harness.run_evaluation \
+  --dataset_name princeton-nlp/SWE-bench_Lite \
+  --predictions_path /Users/mendeza/Documents/2026_research_projects/reasoning-bank/SWE-Bench/results_vllm_two_tasks_no_memory/preds.json \
+  --max_workers 1 \
+  --run_id vllm_qwen_no_memory_two_tasks
+```
+
+#### Evaluate runs with memory
+
+Evaluation uses the same `preds.json` output format. For example:
+
+```bash
+sb-cli submit swe-bench_lite test \
+  --predictions_path /Users/mendeza/Documents/2026_research_projects/reasoning-bank/SWE-Bench/results_vllm_reasoningbank_task2/preds.json \
+  --run_id vllm_qwen_reasoningbank_task2
+```
+
+or locally:
+
+```bash
+python -m swebench.harness.run_evaluation \
+  --dataset_name princeton-nlp/SWE-bench_Lite \
+  --predictions_path /Users/mendeza/Documents/2026_research_projects/reasoning-bank/SWE-Bench/results_vllm_reasoningbank_task2/preds.json \
+  --max_workers 1 \
+  --run_id vllm_qwen_reasoningbank_task2
+```
+
+#### TODO
+
+* Add ChromaDB vector retrieval for ReasoningBank memory
+* Add `BAAI/bge-m3` embeddings for memory selection
+* Add cleaner instructions for running evaluations without memory
+* Add cleaner instructions for running evaluations with memory
+
 ## Acknowledgement
 We adopt code from the following code repositories. We sincerely appreciate these
 great work/codebases:
