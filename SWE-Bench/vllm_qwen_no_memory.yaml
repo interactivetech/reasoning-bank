@@ -127,7 +127,7 @@ agent:
     {%- endif -%}
   format_error_template: |
     Please always provide EXACTLY ONE action in triple backticks, found {{actions|length}} actions.
-  step_limit: 8
+  step_limit: 200
   cost_limit: 0
 
 environment:

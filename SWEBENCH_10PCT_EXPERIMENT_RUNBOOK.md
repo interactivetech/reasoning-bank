@@ -178,6 +178,29 @@ rm -rf SWE-Bench/results_vllm_10pct_reasoningbank
 
 ## 6. Evaluate Baseline
 
+If the baseline was completed across multiple output folders because some
+segments were killed, merge them first:
+
+```bash
+cd /Users/mendeza/Documents/2026_research_projects/reasoning-bank
+
+python3 mergez_result.py \
+  --parts \
+    SWE-Bench/results_vllm_10pct_no_memory/preds.json \
+    SWE-Bench/results_vllm_10pct_no_memory_8_13/preds.json \
+    SWE-Bench/results_vllm_10pct_no_memory_11_12/preds.json \
+    SWE-Bench/results_vllm_10pct_no_memory_12_13/preds.json \
+    SWE-Bench/results_vllm_10pct_no_memory_13_30/preds.json \
+  --out SWE-Bench/results_vllm_10pct_no_memory_merged.json \
+  --missing-out SWE-Bench/results_vllm_10pct_no_memory_missing_ids.txt \
+  --target-count 30
+```
+
+If `results_vllm_10pct_no_memory_missing_ids.txt` is non-empty, those tasks
+still have empty patches and should be rerun before evaluation if you want a
+true 30-task comparison. Otherwise, the evaluator will only score the non-empty
+subset.
+
 ```bash
 cd /Users/mendeza/Documents/2026_research_projects/reasoning-bank
 
@@ -185,15 +208,15 @@ export DOCKER_HOST="unix:///Users/mendeza/.docker/run/docker.sock"
 
 ./.venv312/bin/python -m swebench.harness.run_evaluation \
   --dataset_name princeton-nlp/SWE-bench_Lite \
-  --predictions_path /Users/mendeza/Documents/2026_research_projects/reasoning-bank/SWE-Bench/results_vllm_10pct_no_memory/preds.json \
+  --predictions_path /Users/mendeza/Documents/2026_research_projects/reasoning-bank/SWE-Bench/results_vllm_10pct_no_memory_merged.json \
   --max_workers 1 \
-  --run_id vllm_10pct_no_memory
+  --run_id vllm_10pct_no_memory_merged
 ```
 
 Expected report file:
 
 ```text
-openai__Qwen__Qwen3.6-35B-A3B-FP8.vllm_10pct_no_memory.json
+openai__Qwen__Qwen3.6-35B-A3B-FP8.vllm_10pct_no_memory_merged.json
 ```
 
 ## 7. Evaluate ReasoningBank
@@ -226,7 +249,7 @@ cd /Users/mendeza/Documents/2026_research_projects/reasoning-bank
 python3 - <<'PY'
 import json
 
-baseline = json.load(open("openai__Qwen__Qwen3.6-35B-A3B-FP8.vllm_10pct_no_memory.json"))
+baseline = json.load(open("openai__Qwen__Qwen3.6-35B-A3B-FP8.vllm_10pct_no_memory_merged.json"))
 memory = json.load(open("openai__Qwen__Qwen3.6-35B-A3B-FP8.vllm_10pct_reasoningbank.json"))
 
 print("baseline_resolved:", baseline["resolved_instances"])
@@ -253,7 +276,7 @@ cd /Users/mendeza/Documents/2026_research_projects/reasoning-bank
 python3 - <<'PY'
 import json
 
-baseline = json.load(open("openai__Qwen__Qwen3.6-35B-A3B-FP8.vllm_10pct_no_memory.json"))
+baseline = json.load(open("openai__Qwen__Qwen3.6-35B-A3B-FP8.vllm_10pct_no_memory_merged.json"))
 memory = json.load(open("openai__Qwen__Qwen3.6-35B-A3B-FP8.vllm_10pct_reasoningbank.json"))
 
 b_res = set(baseline["resolved_ids"])
