@@ -9,3 +9,8 @@ logs*/
 memories_reasoningbank/
 *.log
 gt_eval.jsonl
+
+# Ignore runtime ReasoningBank memory artifacts only at repo root.
+# Do not ignore source packages named "memory".
+!/third_party/src/minisweagent/memory/
+!/third_party/src/minisweagent/memory/*.py
